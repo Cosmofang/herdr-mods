@@ -1,0 +1,8 @@
+{
+  "place": "none",
+  "title": "Board",
+  "palette": [
+    { "title": "Board: 打开看板", "command": "tab.new", "args": { "mod": "board", "name": "看板" }, "words": "board kanban 看板 任务 tasks" },
+    { "title": "Board: 新卡片", "command": "board.add", "words": "board card 卡片" }
+  ]
+}
