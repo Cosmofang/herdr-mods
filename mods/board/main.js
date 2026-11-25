@@ -16,7 +16,7 @@ function agentLabel(a) {
   return a.pane_name || [a.space_name, a.title].filter(Boolean).join(" · ") || a.program.name;
 }
 
-/** Narrower than this (px), the columns stack into one list, as in a pane beside a terminal. */
+/** Narrower than this (px), the board is one list of rows, as in a pane beside a terminal. */
 const NARROW = 640;
 
 const STATUS_TEXT = { working: "运行中", blocked: "等你处理", done: "已完成", idle: "空闲", gone: "已结束" };
@@ -29,6 +29,10 @@ function statusColor(t, s) {
 function speed(address) {
   const s = shared("tok-meter.v1")?.[address];
   return s?.rate != null && Date.now() - (s.rateAt ?? 0) < 90_000 ? ` · ${s.rate} tok/s` : "";
+}
+
+function columnColor(t, col) {
+  return { todo: t.muted, doing: t.working, review: t.blocked, done: t.done }[col] ?? t.dim;
 }
 
 function currentFolder() {
@@ -75,7 +79,9 @@ export default class Board extends View {
     this.hoverCol = null;
     this.showArchived = false;
     this.width = null; // from on_size_change; below NARROW the columns stack
-    this.folded = new Set(["done"]); // narrow only: sections shown by their header alone
+    // "rows" or "columns" from props (the right-side palette entry asks for rows); null: by width.
+    this.view = props()?.view ?? null;
+    this.filter = "open"; // narrow only: "open" (all but done) or a column id
     this.input = InputState.new({ placeholder: "新卡片，回车添加" });
     this.input.on("submit", (_e, cx) => this.addCard(cx));
 
@@ -181,31 +187,82 @@ export default class Board extends View {
       .when(meta.length > 0, (el) => el.child(h_flex().gap(8).text_size(11).children(meta)));
   }
 
-  /** Wide: a column of the row, scrolling on its own. Narrow: a section of one scrolling list. */
-  renderColumn(t, col, cards, agentByAddr, narrow) {
+  renderColumn(t, col, cards, agentByAddr) {
     const target = this.drag?.moved && this.hoverCol === col.id;
-    const folded = narrow && this.folded.has(col.id) && !target;
-    const box = v_flex().id(`col-${col.id}`).rounded(10)
+    return v_flex().id(`col-${col.id}`).flex_1().min_w(180).h_full().rounded(10)
       .bg(target ? t.selected : t.canvas).border_1().border_color(target ? t.accent : t.border)
       .on_mouse_move((_e, cx) => { if (this.drag?.moved && this.hoverCol !== col.id) { this.hoverCol = col.id; cx.notify(); } })
       .on_mouse_up("left", (_e, cx) => { this.drop(col.id); cx.notify(); })
-      .child(h_flex().id(`head-${col.id}`).px(12).py(narrow ? 8 : 10).gap(8).items_center()
-        .when(narrow, (el) => el.cursor_pointer().on_click((_e, cx) => {
-          if (this.drag?.moved) return;
-          if (this.folded.has(col.id)) this.folded.delete(col.id); else this.folded.add(col.id);
-          cx.notify();
-        }))
-        .when(narrow, (el) => el.child(div().w(10).text_size(10).text_color(t.dim).child(folded ? "▸" : "▾")))
+      .child(h_flex().px(12).py(10).gap(8).items_center()
         .child(div().text_size(12.5).font_semibold().text_color(t.foreground).child(col.title))
         .child(div().text_size(11).text_color(t.dim).child(String(cards.length))))
-      .when(col.id === "todo" && !folded, (el) => el.child(div().px(10).pb(8)
-        .child(Input.new(this.input).h(30).px(8).rounded(6).border_1().border_color(t.input).bg(t.background).text_size(12).text_color(t.foreground))));
-    if (folded) return box;
-    const list = v_flex().id(`list-${col.id}`).px(10).pb(10).gap(8)
-      .children(cards.map((c) => this.renderCard(t, c, agentByAddr)));
-    return narrow
-      ? box.child(list)
-      : box.flex_1().min_w(180).h_full().child(list.flex_1().min_h(0).overflow_y_scrollbar());
+      .when(col.id === "todo", (el) => el.child(div().px(10).pb(8).child(this.renderInput(t))))
+      .child(v_flex().id(`list-${col.id}`).flex_1().min_h(0).overflow_y_scrollbar().px(10).pb(10).gap(8)
+        .children(cards.map((c) => this.renderCard(t, c, agentByAddr))));
+  }
+
+  renderInput(t) {
+    return Input.new(this.input).h(30).px(8).rounded(6).border_1().border_color(t.input).bg(t.background).text_size(12).text_color(t.foreground);
+  }
+
+  /** One line per card, for a pane beside a terminal. */
+  renderRow(t, c, agentByAddr) {
+    const a = c.agent ? agentByAddr.get(c.agent) : null;
+    const status = c.pending && !c.agent ? "pending" : c.agent ? (a ? a.status : "gone") : null;
+    const overdue = c.due && c.due < today() && c.column !== "done";
+    const dragging = this.drag?.moved && this.drag.kind === "card" && this.drag.id === c.id;
+    const col = COLUMNS.find((x) => x.id === c.column);
+    const tag = columnColor(t, c.column);
+    const sp = speed(c.agent).replace(/^ · /, "");
+    return h_flex().id(`row-${c.id}`).h(34).px(10).gap(8).items_center().rounded(7).border_1()
+      .border_color(c.pinned ? t.accent : t.border).bg(t.background)
+      .opacity(dragging ? 0.4 : c.column === "done" || c.archived ? 0.6 : 1)
+      .cursor_grab().hover((s) => s.border_color(t.input))
+      .on_mouse_down("left", () => { this.drag = { kind: "card", id: c.id, moved: false }; })
+      .on_click(() => { if (!this.drag?.moved) this.openCard(c.id); })
+      .child(div().w(7).h(7).rounded(4).flex_none()
+        .bg(status === "pending" ? t.dim : status ? statusColor(t, status) : t.border))
+      .child(div().flex_1().min_w(0).truncate().text_size(12.5).text_color(t.foreground)
+        .child(`${c.pinned ? "★ " : ""}${c.title || "(无标题)"}`))
+      .when(Boolean(sp), (el) => el.child(div().flex_none().text_size(11).text_color(t.dim).child(sp)))
+      .when(Boolean(c.due), (el) => el.child(div().flex_none().text_size(11).text_color(overdue ? t.blocked : t.dim).child(c.due.slice(5))))
+      .child(div().flex_none().px(6).h(18).flex().items_center().rounded(5).text_size(10.5)
+        .border_1().border_color(tag).text_color(tag).child(col?.title ?? c.column))
+      .when(Boolean(a), (el) => el.child(div().id(`go-${c.id}`).flex_none().px(4).rounded(4).text_size(11).text_color(t.accent)
+        .hover((s) => s.bg(t.hover)).on_click((_e, cx) => { cx.stop_propagation(); run("pane.focus", { pane: a.pane }); })
+        .child("打开")));
+  }
+
+  /** Narrow: filter chips (also drop targets) over one list of rows. */
+  renderRows(t, visible, agentByAddr) {
+    const count = (id) => visible.filter((c) => c.column === id).length;
+    const shown = this.filter === "open"
+      ? visible.filter((c) => c.column !== "done")
+      : visible.filter((c) => c.column === this.filter);
+    // Unfinished: what needs you first, then what runs, then what waits.
+    const rows = this.filter === "open"
+      ? ["review", "doing", "todo"].flatMap((id) => sortCards(shown.filter((c) => c.column === id)))
+      : sortCards(shown);
+    const chip = (id, title, n) => {
+      const target = this.drag?.moved && this.hoverCol === id && id !== "open";
+      const on = this.filter === id;
+      return div().id(`f-${id}`).px(8).h(24).flex().items_center().gap(4).rounded(6).text_size(11.5).cursor_pointer()
+        .border_1().border_color(target ? t.accent : on ? t.selected : t.canvas)
+        .bg(target ? t.selected : on ? t.selected : t.canvas).text_color(on ? t.foreground : t.muted)
+        .hover((s) => s.bg(t.hover))
+        .on_mouse_move((_e, cx) => { if (this.drag?.moved && id !== "open" && this.hoverCol !== id) { this.hoverCol = id; cx.notify(); } })
+        .on_mouse_up("left", (_e, cx) => { if (this.drag?.moved && id !== "open") { this.drop(id); cx.notify(); } })
+        .on_click((_e, cx) => { if (!this.drag?.moved) { this.filter = id; cx.notify(); } })
+        .child(title).child(div().text_color(t.dim).child(String(n)));
+    };
+    return v_flex().flex_1().min_h(0)
+      .child(h_flex().px(10).pb(8).gap(4).flex_wrap()
+        .child(chip("open", "未完成", visible.filter((c) => c.column !== "done").length))
+        .children(COLUMNS.map((col) => chip(col.id, col.title, count(col.id)))))
+      .child(div().px(10).pb(8).child(this.renderInput(t)))
+      .child(v_flex().id("rows").flex_1().min_h(0).overflow_y_scrollbar().px(10).pb(10).gap(6)
+        .when(rows.length === 0, (el) => el.child(div().p(10).text_size(12).text_color(t.dim).child("没有卡片。")))
+        .children(rows.map((c) => this.renderRow(t, c, agentByAddr))));
   }
 
   renderAgentStrip(t, board) {
@@ -233,9 +290,7 @@ export default class Board extends View {
       .text_color(on ? t.foreground : t.muted).bg(on ? t.selected : t.canvas).hover((s) => s.bg(t.hover))
       .cursor_pointer().on_click(action).child(label);
     const review = board.cards.filter((c) => !c.archived && c.column === "review").length;
-    const narrow = this.width != null && this.width < NARROW;
-    const columns = COLUMNS.map((col) => this.renderColumn(t, col,
-      sortCards(visible.filter((c) => c.column === col.id)), agentByAddr, narrow));
+    const narrow = this.view ? this.view === "rows" : this.width != null && this.width < NARROW;
 
     return v_flex().id("board").size_full()
       .on_size_change((size, cx) => {
@@ -256,11 +311,13 @@ export default class Board extends View {
         .when(review > 0, (el) => el.child(div().px(6).rounded(8).bg(t.blocked).text_color(t.background).text_size(11).child(`${review} 待确认`)))
         .child(div().flex_1())
         .child(toggle("auto", narrow ? "自动移动" : "随 agent 自动移动", board.autoFlow, () => update((b) => { b.autoFlow = !b.autoFlow; })))
+        .child(toggle("view", narrow ? "列" : "行", false, (_e, cx) => { this.view = narrow ? "columns" : "rows"; cx.notify(); }))
         .child(toggle("archived", "已归档", this.showArchived, (_e, cx) => { this.showArchived = !this.showArchived; cx.notify(); })))
       .child(this.renderAgentStrip(t, board) ?? div())
       .child(narrow
-        ? v_flex().id("stack").flex_1().min_h(0).overflow_y_scrollbar().gap(8).px(10).pb(10).children(columns)
-        : h_flex().flex_1().min_h(0).gap(10).px(14).pb(14).children(columns));
+        ? this.renderRows(t, visible, agentByAddr)
+        : h_flex().flex_1().min_h(0).gap(10).px(14).pb(14).children(COLUMNS.map((col) => this.renderColumn(t, col,
+          sortCards(visible.filter((c) => c.column === col.id)), agentByAddr))));
   }
 
   // ---------- card detail (dialog) ----------
