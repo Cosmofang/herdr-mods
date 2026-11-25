@@ -16,6 +16,9 @@ function agentLabel(a) {
   return a.pane_name || [a.space_name, a.title].filter(Boolean).join(" · ") || a.program.name;
 }
 
+/** Narrower than this (px), the columns stack into one list, as in a pane beside a terminal. */
+const NARROW = 640;
+
 const STATUS_TEXT = { working: "运行中", blocked: "等你处理", done: "已完成", idle: "空闲", gone: "已结束" };
 
 function statusColor(t, s) {
@@ -71,6 +74,8 @@ export default class Board extends View {
     this.drag = null; // { kind: "card", id } | { kind: "agent", address }, moved
     this.hoverCol = null;
     this.showArchived = false;
+    this.width = null; // from on_size_change; below NARROW the columns stack
+    this.folded = new Set(["done"]); // narrow only: sections shown by their header alone
     this.input = InputState.new({ placeholder: "新卡片，回车添加" });
     this.input.on("submit", (_e, cx) => this.addCard(cx));
 
@@ -176,19 +181,31 @@ export default class Board extends View {
       .when(meta.length > 0, (el) => el.child(h_flex().gap(8).text_size(11).children(meta)));
   }
 
-  renderColumn(t, col, cards, agentByAddr) {
+  /** Wide: a column of the row, scrolling on its own. Narrow: a section of one scrolling list. */
+  renderColumn(t, col, cards, agentByAddr, narrow) {
     const target = this.drag?.moved && this.hoverCol === col.id;
-    return v_flex().id(`col-${col.id}`).flex_1().min_w(180).h_full().rounded(10)
+    const folded = narrow && this.folded.has(col.id) && !target;
+    const box = v_flex().id(`col-${col.id}`).rounded(10)
       .bg(target ? t.selected : t.canvas).border_1().border_color(target ? t.accent : t.border)
       .on_mouse_move((_e, cx) => { if (this.drag?.moved && this.hoverCol !== col.id) { this.hoverCol = col.id; cx.notify(); } })
       .on_mouse_up("left", (_e, cx) => { this.drop(col.id); cx.notify(); })
-      .child(h_flex().px(12).py(10).gap(8).items_center()
+      .child(h_flex().id(`head-${col.id}`).px(12).py(narrow ? 8 : 10).gap(8).items_center()
+        .when(narrow, (el) => el.cursor_pointer().on_click((_e, cx) => {
+          if (this.drag?.moved) return;
+          if (this.folded.has(col.id)) this.folded.delete(col.id); else this.folded.add(col.id);
+          cx.notify();
+        }))
+        .when(narrow, (el) => el.child(div().w(10).text_size(10).text_color(t.dim).child(folded ? "▸" : "▾")))
         .child(div().text_size(12.5).font_semibold().text_color(t.foreground).child(col.title))
         .child(div().text_size(11).text_color(t.dim).child(String(cards.length))))
-      .when(col.id === "todo", (el) => el.child(div().px(10).pb(8)
-        .child(Input.new(this.input).h(30).px(8).rounded(6).border_1().border_color(t.input).bg(t.background).text_size(12).text_color(t.foreground))))
-      .child(v_flex().id(`list-${col.id}`).flex_1().min_h(0).overflow_y_scrollbar().px(10).pb(10).gap(8)
-        .children(cards.map((c) => this.renderCard(t, c, agentByAddr))));
+      .when(col.id === "todo" && !folded, (el) => el.child(div().px(10).pb(8)
+        .child(Input.new(this.input).h(30).px(8).rounded(6).border_1().border_color(t.input).bg(t.background).text_size(12).text_color(t.foreground))));
+    if (folded) return box;
+    const list = v_flex().id(`list-${col.id}`).px(10).pb(10).gap(8)
+      .children(cards.map((c) => this.renderCard(t, c, agentByAddr)));
+    return narrow
+      ? box.child(list)
+      : box.flex_1().min_w(180).h_full().child(list.flex_1().min_h(0).overflow_y_scrollbar());
   }
 
   renderAgentStrip(t, board) {
@@ -216,8 +233,15 @@ export default class Board extends View {
       .text_color(on ? t.foreground : t.muted).bg(on ? t.selected : t.canvas).hover((s) => s.bg(t.hover))
       .cursor_pointer().on_click(action).child(label);
     const review = board.cards.filter((c) => !c.archived && c.column === "review").length;
+    const narrow = this.width != null && this.width < NARROW;
+    const columns = COLUMNS.map((col) => this.renderColumn(t, col,
+      sortCards(visible.filter((c) => c.column === col.id)), agentByAddr, narrow));
 
-    return v_flex().id("board").size_full().bg(t.surface).text_color(t.foreground)
+    return v_flex().id("board").size_full()
+      .on_size_change((size, cx) => {
+        if ((this.width != null && this.width < NARROW) !== (size.width < NARROW) || this.width == null) { this.width = size.width; cx.notify(); }
+        else this.width = size.width;
+      }).bg(t.surface).text_color(t.foreground)
       .on_window_mouse_move((e, cx) => {
         if (!this.drag) return;
         if (e.pressed_button !== "left") { this.drag = null; this.hoverCol = null; cx.notify(); return; }
@@ -231,12 +255,12 @@ export default class Board extends View {
         .child(div().text_size(14).font_semibold().child("看板"))
         .when(review > 0, (el) => el.child(div().px(6).rounded(8).bg(t.blocked).text_color(t.background).text_size(11).child(`${review} 待确认`)))
         .child(div().flex_1())
-        .child(toggle("auto", "随 agent 自动移动", board.autoFlow, () => update((b) => { b.autoFlow = !b.autoFlow; })))
+        .child(toggle("auto", narrow ? "自动移动" : "随 agent 自动移动", board.autoFlow, () => update((b) => { b.autoFlow = !b.autoFlow; })))
         .child(toggle("archived", "已归档", this.showArchived, (_e, cx) => { this.showArchived = !this.showArchived; cx.notify(); })))
       .child(this.renderAgentStrip(t, board) ?? div())
-      .child(h_flex().flex_1().min_h(0).gap(10).px(14).pb(14)
-        .children(COLUMNS.map((col) => this.renderColumn(t, col,
-          sortCards(visible.filter((c) => c.column === col.id)), agentByAddr))));
+      .child(narrow
+        ? v_flex().id("stack").flex_1().min_h(0).overflow_y_scrollbar().gap(8).px(10).pb(10).children(columns)
+        : h_flex().flex_1().min_h(0).gap(10).px(14).pb(14).children(columns));
   }
 
   // ---------- card detail (dialog) ----------
