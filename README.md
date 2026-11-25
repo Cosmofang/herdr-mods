@@ -8,13 +8,17 @@ Each feature is a separate mod placed in `~/.config/herdr-app/mods/`. **Herdr it
 
 | Mod | Status | What it does |
 |---|---|---|
-| `board` | Usable | Task board with columns: To do, Doing, Review, Done. Cards move with agent status. You can hand a card to an AI. |
+| `board` (工作看板) | Usable | Task board with columns: To do, Doing, Review, Done. Cards move with agent status. You can hand a card to an AI. |
 | `side-tasks` | Usable | Agents suggest side tasks with `herdr-suggest-task`; put each on the board, start it in a new tab, hand it back, or dismiss it. |
 | `tok-meter` | Usable | Live tok/s, context fill and token totals per agent (Claude Code and Codex), also shown on board cards. |
 
 ### board
 
-- **Open it**: press ⌘⇧P and choose `Board: 在右侧打开` ("Open on the right", beside the terminal you are in) or `Board: 在新标签打开` ("Open in a new tab"). On the right the board is one list, a row per card: filter chips on top (未完成 "Unfinished" shows Review, then Doing, then To do), and dragging a row onto a chip moves it to that column. In a tab it shows four columns. The 行/列 ("Rows/Columns") button in the header switches by hand.
+- **Open it**: press ⌘⇧P and choose `工作看板: 在右侧打开` ("Open on the right", beside the terminal you are in) or `工作看板: 在新标签打开` ("Open in a new tab"). On the right the board is one list, a row per card: filter chips on top (未完成 "Unfinished" shows Review, then Doing, then To do), and dragging a row onto a chip moves it to that column. In a tab it shows four columns. The 行/列 ("Rows/Columns") button in the header switches by hand.
+- **One key**: Herdr's own buttons are shipped files a mod can't add to, so bind a key instead. Add to `global` in `~/.config/herdr-app/keys.json` (editing that file keeps it yours: shortcuts Herdr adds later must then be added by hand):
+  ```json
+  "cmd-shift-b": { "command": "pane.split", "args": { "direction": "right", "mod": "board", "props": { "view": "rows" } } }
+  ```
 - **Cards**: type in the input at the top of the To do column and press Enter. Click a card to edit its title, Markdown details, due date and working directory. You can also pin, archive or delete it from there.
 - **Moves with agents**: once a card is linked to an agent, the card moves when the agent's status changes. Working → Doing; waiting for you or finished → Review. A column you drag the card to stays put until the agent's status changes again. Turn this off with the "随 agent 自动移动" ("Move with agent") switch in the top right.
 - **Drag agents onto the board**: agents not yet on the board are listed at the top. Drag one onto a column to create a card linked to it. If it already has a card, that card moves to the column.

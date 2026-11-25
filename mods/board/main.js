@@ -16,6 +16,9 @@ function agentLabel(a) {
   return a.pane_name || [a.space_name, a.title].filter(Boolean).join(" · ") || a.program.name;
 }
 
+/** What people see; the folder (and so the mod) stays "board". */
+const NAME = "工作看板";
+
 /** Narrower than this (px), the board is one list of rows, as in a pane beside a terminal. */
 const NARROW = 640;
 
@@ -138,6 +141,18 @@ export default class Board extends View {
 
   openCard(id) {
     openOverlay({ mod: "board", props: { card: id }, kind: "dialog", width: 600, height: 560 });
+  }
+
+  /** A board pane is titled by the mod's folder name ("board") until named; name it, outside render. */
+  nameOwnPanes(cx) {
+    if (checking() || this.naming) return;
+    const unnamed = panes().filter((p) => p.mod === "board" && !p.name);
+    if (!unnamed.length) return;
+    this.naming = true;
+    cx.spawn(async () => {
+      for (const p of unnamed) run("pane.rename", { pane: p.pane, name: NAME });
+      this.naming = false;
+    });
   }
 
   /** Auto-flow: run after render, never inside it. */
@@ -290,6 +305,7 @@ export default class Board extends View {
       .text_color(on ? t.foreground : t.muted).bg(on ? t.selected : t.canvas).hover((s) => s.bg(t.hover))
       .cursor_pointer().on_click(action).child(label);
     const review = board.cards.filter((c) => !c.archived && c.column === "review").length;
+    this.nameOwnPanes(cx);
     const narrow = this.view ? this.view === "rows" : this.width != null && this.width < NARROW;
 
     return v_flex().id("board").size_full()
@@ -307,7 +323,7 @@ export default class Board extends View {
         cx.timer.after(30, (cx) => { if (this.drag) { this.drag = null; this.hoverCol = null; cx.notify(); } });
       })
       .child(h_flex().px(14).py(10).gap(8).items_center()
-        .child(div().text_size(14).font_semibold().child("看板"))
+        .child(div().text_size(14).font_semibold().child(NAME))
         .when(review > 0, (el) => el.child(div().px(6).rounded(8).bg(t.blocked).text_color(t.background).text_size(11).child(`${review} 待确认`)))
         .child(div().flex_1())
         .child(toggle("auto", narrow ? "自动移动" : "随 agent 自动移动", board.autoFlow, () => update((b) => { b.autoFlow = !b.autoFlow; })))
