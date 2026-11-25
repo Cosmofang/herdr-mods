@@ -1,0 +1,44 @@
+#!/bin/sh
+# Offer the user a side task from inside a Herdr terminal: work worth doing outside the
+# current task (a bug, cleanup or follow-up you noticed). It waits in Herdr's side-tasks
+# panel, where the user can put it on the board, start it in a new tab, or hand it back.
+#
+#   herdr-suggest-task --title "Fix flaky login test" \
+#     --prompt "What, where, why and how to check it, for an agent that hasn't seen this thread." \
+#     [--reason "Why it matters, in a sentence."]
+#
+# One task per call. Not for steps of your current task or work the user asked for.
+set -e
+
+title="" prompt="" reason=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --title) title="$2"; shift 2 ;;
+    --prompt) prompt="$2"; shift 2 ;;
+    --reason) reason="$2"; shift 2 ;;
+    -h|--help) sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "herdr-suggest-task: unknown argument: $1 (see --help)" >&2; exit 2 ;;
+  esac
+done
+[ -n "$title" ] || { echo "herdr-suggest-task: --title is required" >&2; exit 2; }
+[ -n "$prompt" ] || { echo "herdr-suggest-task: --prompt is required" >&2; exit 2; }
+
+inbox="${HERDR_APP_HOME:-$HOME/.config/herdr-app}/data/herdr-side-tasks/inbox"
+mkdir -p "$inbox"
+id="st$(date +%s)$$"
+
+# JSON-escape with whatever is available; node and python3 both handle Unicode correctly.
+if command -v node >/dev/null 2>&1; then
+  json=$(node -e 'const [t,p,r,c,f,id]=process.argv.slice(1);process.stdout.write(JSON.stringify({id,title:t,prompt:p,reason:r||null,cwd:c,from:f||null,created:Date.now()}))' \
+    "$title" "$prompt" "$reason" "$PWD" "${HC_TERMINAL_ID:-}" "$id")
+elif command -v python3 >/dev/null 2>&1; then
+  json=$(python3 -I -c 'import json,sys,time;t,p,r,c,f,i=sys.argv[1:];print(json.dumps({"id":i,"title":t,"prompt":p,"reason":r or None,"cwd":c,"from":f or None,"created":int(time.time()*1000)},ensure_ascii=False),end="")' \
+    "$title" "$prompt" "$reason" "$PWD" "${HC_TERMINAL_ID:-}" "$id")
+else
+  echo "herdr-suggest-task: needs node or python3" >&2; exit 1
+fi
+
+tmp="$inbox/.$id.tmp"
+printf '%s' "$json" > "$tmp"
+mv "$tmp" "$inbox/$id.json"
+echo "Suggested: $title"

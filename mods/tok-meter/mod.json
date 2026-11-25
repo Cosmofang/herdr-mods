@@ -1,0 +1,8 @@
+{
+  "place": "none",
+  "title": "Tok meter",
+  "palette": [
+    { "title": "Tok meter: 在右侧打开", "command": "pane.split", "args": { "direction": "right", "mod": "tok-meter" }, "words": "token tok/s usage context 用量 速度 上下文" },
+    { "title": "Tok meter: 在新标签打开", "command": "tab.new", "args": { "mod": "tok-meter", "name": "Token" }, "words": "token tok/s usage 用量" }
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "place": "none",
+  "title": "Side tasks",
+  "palette": [
+    { "title": "Side tasks: 在右侧打开", "command": "pane.split", "args": { "direction": "right", "mod": "side-tasks" }, "words": "side tasks suggest 旁支 任务 建议" },
+    { "title": "Side tasks: 清掉已处理的", "command": "side-tasks.clear", "words": "side tasks clear 旁支 清理" }
+  ]
+}

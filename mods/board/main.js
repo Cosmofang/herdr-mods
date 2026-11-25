@@ -4,7 +4,7 @@ import { View, div } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input, TextareaState, Textarea } from "gpui-base";
 import {
   agents, panes, spaces, focused, theme, run, props, openOverlay, closeOverlay,
-  knownAgents, pickFolder, notify, checking, nextCommand,
+  knownAgents, pickFolder, notify, checking, nextCommand, shared,
 } from "herdr";
 import {
   COLUMNS, load, update, newCard, reconcile, sortCards, today, basename,
@@ -20,6 +20,12 @@ const STATUS_TEXT = { working: "运行中", blocked: "等你处理", done: "已�
 
 function statusColor(t, s) {
   return { working: t.working, blocked: t.blocked, done: t.done, idle: t.idle }[s] ?? t.unknown;
+}
+
+/** " · 60 tok/s" from the tok-meter mod while one is open and the speed is recent, else "". */
+function speed(address) {
+  const s = shared("tok-meter.v1")?.[address];
+  return s?.rate != null && Date.now() - (s.rateAt ?? 0) < 90_000 ? ` · ${s.rate} tok/s` : "";
 }
 
 function currentFolder() {
@@ -163,7 +169,7 @@ export default class Board extends View {
         .child(div().flex_1().text_size(12.5).text_color(t.foreground).child(c.title || "(无标题)")))
       .when(Boolean(status), (el) => el.child(h_flex().gap(6).items_center().text_size(11)
         .child(div().w(7).h(7).rounded(4).bg(status === "pending" ? t.dim : statusColor(t, status)))
-        .child(div().text_color(t.muted).child(status === "pending" ? "启动中…" : `${a?.program?.name ?? "agent"} · ${STATUS_TEXT[status]}`))
+        .child(div().text_color(t.muted).child(status === "pending" ? "启动中…" : `${a?.program?.name ?? "agent"} · ${STATUS_TEXT[status]}${speed(c.agent)}`))
         .when(Boolean(a), (el) => el.child(div().id(`go-${c.id}`).ml_auto().px(6).rounded(4).text_color(t.accent)
           .hover((s) => s.bg(t.hover)).on_click((_e, cx) => { cx.stop_propagation(); run("pane.focus", { pane: a.pane }); })
           .child("打开")))))
